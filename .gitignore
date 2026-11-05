@@ -1,0 +1,17 @@
+# Dependencies
+/vendor/
+composer.lock
+
+# Release notes (never tracked)
+/releases/
+
+# Testing artifacts
+.phpunit.result.cache
+.phpunit.cache/
+phpunit.xml
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
