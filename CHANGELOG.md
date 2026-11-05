@@ -3,7 +3,7 @@
 All Zana packages share one version number and are released together. A release that did
 not change this package is not listed.
 
-## 2.13.0 — Unreleased
+## 2.13.0 — 2026-11-05
 
 First release (FE-55, ADR-028). The transactional outbox for Zana applications. Events are
 saved in the same transaction as the change that caused them. They are delivered through the
