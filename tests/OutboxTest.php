@@ -24,6 +24,8 @@ use Zana\Outbox\Inbox;
 use Zana\Outbox\Internal\Payload;
 use Zana\Outbox\Inspection\OutboxCheck;
 use Zana\Outbox\Inspection\OutboxSection;
+use Zana\Outbox\Inspection\PayloadSigningCheck;
+use Zana\Outbox\PayloadKey;
 use Zana\Outbox\Outbox;
 use Zana\Outbox\OutboxException;
 use Zana\Outbox\OutboxRelay;
@@ -246,7 +248,45 @@ final class OutboxTest extends TestCase
         exec(PHP_OS_FAMILY === 'Windows' ? 'rmdir /s /q ' . escapeshellarg(str_replace('/', '\\', $base)) : 'rm -rf ' . escapeshellarg($base));
     }
 
-    private function boot(string $driver): void
+    public function testMessagesAreSignedAndAForgedRowBuildsNothing(): void
+    {
+        $this->boot('sqlite', ['security.secret' => str_repeat('s', 40)]);
+        $outbox = $this->outbox();
+        $this->db->transaction(static fn () => $outbox->add(new TicketsIssued('o-8', 1), new TicketsIssued('o-9', 2)));
+        $rows = $this->db->table(Outbox::TABLE)->get();
+        $this->assertCount(2, $rows);
+        $this->assertTrue(PayloadKey::isSealed((string) $rows[0]['payload']), 'stored signed');
+
+        // Someone with write access to the table replaces one message.
+        $marker = sys_get_temp_dir() . '/zana-outbox-gadget-' . bin2hex(random_bytes(4));
+        $gadget = new OutboxGadget();
+        $gadget->file = $marker;
+        $this->db->table(Outbox::TABLE)->where('id', $rows[0]['id'])->update(['payload' => base64_encode(serialize($gadget))]);
+        $gadget->file = '';
+
+        $this->relay()->relay();
+        gc_collect_cycles();
+
+        $this->assertCount(1, $this->listener->received, 'the signed message was delivered');
+        $this->assertFileDoesNotExist($marker, 'the forged row built nothing');
+        $this->assertStringContainsString('not signed', (string) $this->db->table(Outbox::TABLE)->where('id', $rows[0]['id'])->value('last_error'));
+        $this->assertSame([], self::tagged($this->app, ApplicationCheck::TAG, PayloadSigningCheck::class)->findings($this->app));
+    }
+
+    public function testCheckWarnsWhenMessagesAreNotSigned(): void
+    {
+        $this->boot('sqlite');
+
+        $findings = self::tagged($this->app, ApplicationCheck::TAG, PayloadSigningCheck::class)->findings($this->app);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame('outbox.payload_signing', $findings[0]->id);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function boot(string $driver, array $config = []): void
     {
         $settings = Databases::settings($driver);
         if (is_string($settings)) {
@@ -257,7 +297,7 @@ final class OutboxTest extends TestCase
         $this->app = Application::configure(sys_get_temp_dir() . '/zana-outbox-tests')
             ->withEnvironment('testing')
             ->withProviders(DatabaseServiceProvider::class, EventsServiceProvider::class, ConsoleServiceProvider::class, OutboxServiceProvider::class)
-            ->withConfiguration(['database.connections.main' => $settings])
+            ->withConfiguration(['database.connections.main' => $settings, ...$config])
             ->withServices(static fn (ServiceCollectionInterface $s) => $s->instance(Recorder::class, $listener))
             ->build();
         $listeners = $this->app->container()->get(ListenerProvider::class);
@@ -316,5 +356,17 @@ final class OutboxTest extends TestCase
             }
         }
         self::fail("{$class} is not tagged {$tag}.");
+    }
+}
+
+final class OutboxGadget
+{
+    public string $file = '';
+
+    public function __destruct()
+    {
+        if ($this->file !== '') {
+            file_put_contents($this->file, 'written by a forged outbox row');
+        }
     }
 }

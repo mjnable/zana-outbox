@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Zana\Outbox\Internal;
 
 use Zana\Outbox\OutboxException;
+use Zana\Outbox\PayloadKey;
 
 /**
  * Turns messages into strings and back, as the queue's payloads do: reading
@@ -20,7 +21,7 @@ final class Payload
     /** @var array<class-string, list<string>> */
     private static array $allowed = [];
 
-    public static function encode(object $message): string
+    public static function encode(object $message, ?PayloadKey $key = null): string
     {
         if ($message instanceof \Closure || (new \ReflectionClass($message))->isAnonymous()) {
             throw new OutboxException('Closures and anonymous classes cannot go in the outbox; use a named message class.');
@@ -28,14 +29,15 @@ final class Payload
 
         try {
             // Base64: serialize() writes NUL bytes for protected and private properties, which PostgreSQL text columns refuse.
-            return base64_encode(serialize($message));
+            return ($key ?? new PayloadKey(null))->seal(base64_encode(serialize($message)));
         } catch (\Throwable $e) {
             throw new OutboxException('The message ' . $message::class . ' cannot be serialized: ' . $e->getMessage(), previous: $e);
         }
     }
 
-    public static function decode(string $encoded): object
+    public static function decode(string $encoded, ?PayloadKey $key = null): object
     {
+        $encoded = ($key ?? new PayloadKey(null))->open($encoded);   // before anything is built (2.20)
         $payload = base64_decode($encoded, true);
         if ($payload === false || preg_match('/^O:\d+:"([^"]+)"/', $payload, $match) !== 1 || !class_exists($match[1])) {
             throw new OutboxException('The payload does not describe a known message class.');

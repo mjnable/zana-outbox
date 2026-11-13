@@ -3,6 +3,17 @@
 All Zana packages share one version number and are released together. A release that did
 not change this package is not listed.
 
+## 2.20.0 — Unreleased
+
+### Security
+
+- Outbox messages are signed, HMAC-SHA256 with `outbox.key` or a key derived from `security.secret`, and the signature is
+  checked before anything is unserialized, so a row added to the outbox table by anything but the application is refused
+  (S28). `PayloadKey` holds the key.
+- Unsigned messages, written before 2.20, are refused; `outbox.accept_unsigned: true` lets them through while the
+  outbox drains. Without any key, messages are neither signed nor checked, as before.
+- `check` warns (outbox.payload_signing) when messages are not signed, or unsigned ones are accepted.
+
 ## 2.13.0 — 2026-11-05
 
 First release (FE-55, ADR-028). The transactional outbox for Zana applications. Events are

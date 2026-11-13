@@ -58,7 +58,7 @@ final class Outbox implements Disposable
         $rows = [];
         foreach ($messages as $message) {
             $id = $message instanceof DomainEvent ? $message->getEventId() : Uuid::v7();
-            $rows[] = ['id' => $id, 'type' => $message::class, 'payload' => Payload::encode($message), 'attempts' => 0, 'created_at' => $now, 'available_at' => $now];
+            $rows[] = ['id' => $id, 'type' => $message::class, 'payload' => Payload::encode($message, $this->relay->payloadKey()), 'attempts' => 0, 'created_at' => $now, 'available_at' => $now];
             $this->recorded[] = $id;
         }
         $this->connection->table(self::TABLE)->insert($rows);

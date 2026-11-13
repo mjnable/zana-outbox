@@ -19,6 +19,7 @@ use Zana\Outbox\Console\RelayCommand;
 use Zana\Outbox\Console\RetryCommand;
 use Zana\Outbox\Inspection\OutboxCheck;
 use Zana\Outbox\Inspection\OutboxSection;
+use Zana\Outbox\Inspection\PayloadSigningCheck;
 
 /**
  * Registers the outbox (scoped), its relay, the inbox, the outbox: commands
@@ -44,6 +45,7 @@ final class OutboxServiceProvider extends ServiceProvider
                     array_values(array_map(intval(...), $config->array('outbox.backoff', [10, 60, 300, 1800]))),
                     $config->int('outbox.claim_seconds', 60),
                     $logger instanceof LoggerInterface ? $logger : null,
+                    key: self::payloadKey($config),
                 );
             })->uses(ConnectionInterface::class, EventDispatcherInterface::class, ConfigurationInterface::class, LoggerInterface::class)
             ->scoped(Outbox::class, static fn (ServiceResolverInterface $r): Outbox => new Outbox(self::connection($r), self::relay($r)))
@@ -57,7 +59,10 @@ final class OutboxServiceProvider extends ServiceProvider
             ->tag(ApplicationCheck::TAG, OutboxCheck::class)
             ->singleton(OutboxSection::class, static fn (ServiceResolverInterface $r): OutboxSection => new OutboxSection(static fn (): OutboxRelay => self::relay($r)))
             ->uses(OutboxRelay::class)
-            ->tag(InspectionSection::TAG, OutboxSection::class);
+            ->tag(InspectionSection::TAG, OutboxSection::class)
+            ->singleton(PayloadSigningCheck::class, static fn (ServiceResolverInterface $r): PayloadSigningCheck => new PayloadSigningCheck(self::payloadKey(self::config($r))))
+            ->uses(ConfigurationInterface::class)
+            ->tag(ApplicationCheck::TAG, PayloadSigningCheck::class);
 
         if (class_exists(ConsoleKernel::class)) {
             foreach ([RelayCommand::class, RetryCommand::class, InstallCommand::class] as $command) {
@@ -69,6 +74,20 @@ final class OutboxServiceProvider extends ServiceProvider
     public function origin(): string
     {
         return 'package:mj-zana/outbox';
+    }
+
+    /**
+     * outbox.key, else a key derived from security.secret, else none (2.20);
+     * outbox.accept_unsigned lets messages from before 2.20 through.
+     */
+    public static function payloadKey(ConfigurationInterface $config): PayloadKey
+    {
+        $accept = $config->bool('outbox.accept_unsigned', false);
+        if ($config->has('outbox.key')) {
+            return new PayloadKey($config->string('outbox.key'), $accept);
+        }
+
+        return PayloadKey::fromSecret($config->has('security.secret') ? $config->string('security.secret') : null, 'zana.outbox.payload', $accept);
     }
 
     private static function relay(ServiceResolverInterface $r): OutboxRelay

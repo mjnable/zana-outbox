@@ -33,6 +33,7 @@ final class OutboxRelay
         private readonly int $claimSeconds = 60,
         private readonly ?LoggerInterface $logger = null,
         ?\Closure $clock = null,
+        private readonly ?PayloadKey $key = null,
     ) {
         $this->clock = $clock ?? time(...);
     }
@@ -98,6 +99,16 @@ final class OutboxRelay
         ];
     }
 
+    /**
+     * The key that signs messages, for the Outbox that writes them (2.20).
+     *
+     * @internal
+     */
+    public function payloadKey(): ?PayloadKey
+    {
+        return $this->key;
+    }
+
     private function claim(string $id, int $now): bool
     {
         return $this->connection->table(Outbox::TABLE)
@@ -114,7 +125,7 @@ final class OutboxRelay
         $attempts = (int) $row['attempts'];
 
         try {
-            $this->events->dispatch(Payload::decode((string) $row['payload']));
+            $this->events->dispatch(Payload::decode((string) $row['payload'], $this->key));
         } catch (\Throwable $error) {
             $this->failed($id, (string) $row['type'], $attempts, $error);
 
