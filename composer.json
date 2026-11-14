@@ -216,7 +216,7 @@
             "options": {
                 "symlink": true,
                 "versions": {
-                    "mj-zana/routing": "2.12.0"
+                    "mj-zana/routing": "2.21.0"
                 }
             }
         },
