@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Every day as well, so a release of a dependency that breaks something shows without a commit here.
+  schedule:
+    - cron: '23 3 * * *'
 
 jobs:
   tests:
