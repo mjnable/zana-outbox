@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zana-outbox
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: mbstring, intl, gd, fileinfo, sodium, zip, pdo_sqlite, pdo_mysql, pdo_pgsql
+          coverage: none
+      # composer.json points at the sibling packages beside this one (../zana-*), as on a developer's machine:
+      # clone them at main, so the package is tested with the code it will be released with.
+      - name: Siblings
+        run: |
+          php -r 'foreach (json_decode(file_get_contents("zana-outbox/composer.json"), true)["repositories"] ?? [] as $r) { if (($r["type"] ?? "") === "path") { echo basename($r["url"]), PHP_EOL; } }' |
+            while read -r sibling; do
+              git clone --quiet --depth 1 "https://github.com/mjnable/${sibling}.git" "$sibling"
+            done
+      - run: git config --global user.name CI && git config --global user.email ci@example.com
+      - run: composer update --no-interaction --no-progress
+        working-directory: zana-outbox
+      - name: PHPUnit
+        working-directory: zana-outbox
+        run: |
+          set -o pipefail
+          vendor/bin/phpunit --display-skipped --display-incomplete | tee phpunit.out
+      # The MySQL and PostgreSQL tests skip themselves when no server answers: here one always should.
+      - name: Every database test ran
+        working-directory: zana-outbox
+        run: |
+          if grep -E "is not reachable|pdo_(mysql|pgsql) is not loaded" phpunit.out; then
+            echo "::error::Database tests were skipped: the MySQL or PostgreSQL service did not answer."
+            exit 1
+          fi
+      - name: PHPStan
+        working-directory: zana-outbox
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
