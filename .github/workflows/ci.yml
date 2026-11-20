@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: zana-outbox
+          fetch-depth: 0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
@@ -43,6 +44,15 @@ jobs:
             while read -r sibling; do
               git clone --quiet --depth 1 "https://github.com/mjnable/${sibling}.git" "$sibling"
             done
+      # Every Zana package carries the release version: this one, and each sibling beside it, take the latest
+      # release's, so the constraints between them resolve as they will when released. Only this run's copy of
+      # composer.json is changed; the version pins committed for local development may lag behind.
+      - name: Versions
+        run: |
+          version=$(git -C zana-outbox describe --tags --abbrev=0 | sed 's/^v//')
+          echo "COMPOSER_ROOT_VERSION=${version}" >> "$GITHUB_ENV"
+          php -r '$f = "zana-outbox/composer.json"; $c = json_decode(file_get_contents($f), true); foreach ($c["repositories"] ?? [] as $i => $r) { foreach (array_keys($r["options"]["versions"] ?? []) as $name) { $c["repositories"][$i]["options"]["versions"][$name] = $argv[1]; } } file_put_contents($f, json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));' -- "$version"
+          echo "Testing as ${version}, with every sibling at ${version}"
       - run: git config --global user.name CI && git config --global user.email ci@example.com
       - run: composer update --no-interaction --no-progress
         working-directory: zana-outbox
